@@ -1,0 +1,25 @@
+name: Unpack project
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - nature-quest.zip
+permissions:
+  contents: write
+jobs:
+  unpack:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unzip into repo root
+        run: |
+          unzip -q nature-quest.zip
+          cp -r nature-quest/. .
+          rm -rf nature-quest nature-quest.zip
+      - name: Commit
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add -A
+          git commit -m "Add Nature Quest project" || echo "nothing to commit"
+          git push
