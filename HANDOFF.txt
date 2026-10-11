@@ -1,0 +1,111 @@
+NATURE QUEST - HANDOFF (feature-complete, ready to ship)
+
+ORIGIN
+Built for the DEV/Hacktoberfest 2026 Week 1 "Touch Grass" challenge. Deadline: Oct 11, 2026, 11:59 PM PDT.
+Brief: offline-first mobile PWA; open-weight/local AI at the core; zero paid inference; AI writes real-world
+outdoor missions, user leaves the screen, returns to verify and reflect. Firebase project nature-quest-c14be.
+
+CURRENT POSITION
+Checkpoints 1-6 complete + polish/regression pass. Remaining: real-device validation and submission.
+
+COMPLETED
+CP1  PWA shell (sw.js, manifest, icons), IndexedDB store with memory fallback, outbox, Firebase auth wrapper
+     (Email/Google/Apple, lazy SDK, never blocks offline), hash router, welcome/home/you, post-sign-in splash.
+CP2  js/quest/: model (state machine ready>active>returned>completed, abandoned), safety (regex rules),
+     fallback (12 static quests, deterministic selection), engine (build/save/enqueue/move).
+CP3  js/ai/: engine (status, config, prepare, generateQuest/Clue/Reflection/adaptQuest), prompt (tagged-line
+     format + tolerant parser), providers/browser.js (Transformers.js 3.8.1 from jsDelivr, model
+     onnx-community/Qwen2.5-0.5B-Instruct q4, WASM, user-confirmed download), providers/endpoint.js
+     (any OpenAI-compatible local server, e.g. Ollama running gpt-oss:20b). UI: #/ai settings screen,
+     AI status on #/new, "Written by <model>" vs "From the library" pill on the quest.
+CP4  js/quest/loop.js (startQuest/returnQuest/resumeQuest/finishQuest, streaks) + UI: #/away leave-screen moment
+     (screen rests after 8s, tap wakes), active quest, return flow (did you complete it / what did you discover),
+     optional AI follow-up line (ai.generateReflection, only shown if the AI wrote something new), #/done summary.
+     Finishing is idempotent (lock + deterministic completion id + crash repair). Outcomes: full, partial, skipped.
+     Only "full" counts toward quests done; full and partial both count toward the day streak.
+CP5  js/quest/verify.js: time-vs-duration check (needs a tick if too quick), optional photo (pixel sanity check,
+     kept on device), honest level labels. finishQuest enforces it. Photos never leave the phone.
+CP6  js/quest/achievements.js (derived, never stored), journal (#/journal), difficulty progression, home "Latest".
+Fix  AI "loading forever": model now runs in js/ai/worker.js with a watchdog (idle/total timeouts, abort, terminate),
+     streamed text, skip button, honest fallback note, and a diagnostics test screen. Quest creation is one tap
+     using remembered preferences ("Choose what I feel like" is optional).
+Sync js/sync.js drains the outbox to Firestore (newest rev only, ordered, deletes only after success);
+     js/claim.js moves a local profile's data to an account on sign-in. NOT tested against live Firestore.
+
+VERIFIED (automated)
+node: quest 13, ai 13, loop 11, verify 12. Browser: smoke 15, ai_hang 9, ai_ui 9, loop_ui 15, photo_ui 9.
+node tests/loop.test.mjs   11 pass (once-only completion, double tap, crash repair, streak/month boundary)
+python3 tests/loop_ui.py   14 pass (full loop offline, reload at every stage, double-tap finish, skip)
+node tests/quest.test.mjs  13 pass (safety, every context combo, state machine, engine, outbox dedupe)
+node tests/ai.test.mjs     13 pass (prompt, parser, retry with rejection reasons, fallback on error,
+                           real HTTP round-trip to a local OpenAI-compatible server)
+python3 tests/smoke.py     15 pass (needs: python3 -m http.server 8099 in project root)
+python3 tests/ai_ui.py     9 pass (AI settings, connect, AI-written quest, reload, server down -> library)
+Chromium, 390x844, including offline reload with an active quest.
+
+NOT VERIFIED (be honest in the submission until tested)
+- Real in-browser inference with Qwen2.5-0.5B on an actual phone (no Hugging Face access in the build sandbox).
+  Check: download size/time, tokens/s on WASM, output quality, memory. If poor, swap BROWSER_MODEL in
+  js/ai/providers/browser.js (e.g. a smaller/other ONNX instruct model) - nothing else changes.
+- Google/Email/Apple sign-in against live Firebase. Apple needs Apple-side setup + enabled provider.
+- Install prompt on a real Android device.
+
+KNOWN ISSUES
+- Backup is push-only: no pull/restore on a new device. Needs Firestore enabled + rules (see README).
+- Endpoint provider from an https page can only reach http://localhost (desktop) - a phone cannot reach a
+  LAN http server (mixed content). On phones use the on-device model. Ollama needs OLLAMA_ORIGINS set.
+- Completion is self-reported only (verification arrives in CP5). Wake Lock is deliberately not used.
+- evaluateQuestResponse() intentionally not implemented (belongs to CP5 verification).
+
+DO NOT TOUCH
+- js/store.js outbox id scheme (owner|entity|record|rev): sync dedupe relies on it.
+- js/quest/model.js transition(): single source of truth for lifecycle; always go through engine.moveQuest.
+- js/quest/safety.js rules + engine safety check on ALL quest text (AI and static). Add rules, never bypass.
+- sw.js: bump VERSION when shell files change and keep the SHELL list in sync with new files.
+- app.js controllerchange guard (no reload on first install).
+
+CURRENT ARCHITECTURE
+index.html -> js/app.js (router + views) -> auth.js / store.js / quest/engine.js -> ai/engine.js ->
+provider (browser | endpoint) -> open model. Static library is the floor when AI is off/fails/unsafe.
+Deploy: whole folder, firebase deploy --only hosting (project nature-quest-c14be, public dir ".").
+
+NEXT DESTINATION (superseded: CP5/6 done)
+Was Checkpoint 5: verification. Reuse finishQuest as the single completion path: add evidence gathering BEFORE it
+(minimum outdoor time vs quest duration, optional camera/photo evidence, quest-specific check, honest "self-reported"
+label when nothing was verified), invalid/too-quick handling, then regression of repeat/cancel/reload/offline.
+Never claim the AI verified something it did not. Then CP6 progression (achievements, history), CP7 polish.
+
+CONTINUATION COMMAND
+"PROCEED from Checkpoint 4. Read HANDOFF.txt, run all test commands, then build Checkpoint 5."
+
+UPDATE
+Next: test the on-device model on a real phone (You > On-device AI > Test the AI). If it is too slow, change
+BROWSER_MODEL in js/ai/providers/browser.js. Then deploy and write the DEV post.
+
+UPDATE 2 (real-phone findings)
+Device: Android 10 Chrome, 8 GB, WebGPU API present but NO adapter ("Failed to get GPU adapter"). CPU WASM with
+Qwen2.5-0.5B q4 measured ~0.3 tokens/s (load 19s, first token 15s) = unusable for a whole quest.
+Changes: default model now SmolLM2-135M-Instruct (q4, ~200 MB, selectable; Qwen kept as "Better writing");
+GPU only tried if requestAdapter() succeeds; prompt and output shortened (<=130 tokens); model requests are queued.
+js/ai/pantry.js writes the likely next quest in the background while on Home and stores validated drafts, so the
+one-tap quest is instant when one is ready; otherwise the person watches it stream (skip button) or gets the library.
+Tests: node quest 13, ai 13, loop 11, verify 12, pantry 8. Browser smoke 15, ai_hang 11, ai_ui 9, loop_ui 15, photo_ui 9.
+STILL UNVERIFIED: SmolLM2-135M speed and wording quality on the real phone. If still too slow, options in order:
+shorter job (title+one line only), embeddings-based personalisation (all-MiniLM-L6-v2), or own-computer provider.
+
+UPDATE 3 (product decision after real-phone tests)
+SmolLM2-135M was faster but rambled and never finished a quest on the test phone. Decision: stop free-writing by default.
+Quests = 30 checked library missions (js/quest/fallback.js, with mood tags). js/ai/matcher.js uses all-MiniLM-L6-v2 (~25 MB)
+to RE-ORDER safe candidates by meaning (typed mood, time of day, season, company, energy); 7s cap then rules-based pick, so
+the screen never waits. Free-writing (pantry/browser/endpoint providers) kept but off by default ("experimental").
+UI: quest card shows Why this / Your task / Time; "Show me another" abandons and creates a different quest instantly;
+Home offers one-time "turn on on-device AI" (25 MB). Old configs with writing enabled are migrated to off (cfg.v2).
+Tests: node quest 13, ai 13, loop 11, verify 12, pantry 8, match 8. Browser: smoke 15, match_ui 10, ai_hang 11, ai_ui 9,
+loop_ui 15, photo_ui 9. UNVERIFIED on a real phone: MiniLM download/speed (use You > On-device AI > Test matching).
+
+UPDATE 4
+Library expanded to 114 quests (tests enforce: 100+, unique ids/titles, mood tags, 12+ candidates per place x company,
+12+ per activity, 8+ per difficulty). Matching now embeds title+intro+steps+tags, learns a mild taste from finished quests
+(liked ids -> centroid bonus), pools 14 candidates, and prepares library vectors in prepare()/background (warm()); until
+ready it reports "warming" and the rules pick (never blocks). Tests: node quest 14, ai 13, loop 11, verify 12, pantry 8,
+match 10; browser smoke 15, match_ui 10, ai_hang 11, ai_ui 9, loop_ui 15, photo_ui 9.
